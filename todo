@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+
+NUMBER='^[0-9]+$'
+TODOS="$HOME/Documents/todo.txt"
+COMMAND="$0"
+HELP="
+\033[1mUsage\033[0m: \033[36m$COMMAND [option] <task>\033[0m
+
+\033[1mOptions\033[0m:
+ --add, -a        add a new todo
+ --unset, -u      unset a todo
+ --done, -x       mark todo as done
+ --help, -h       show this help text
+ --verbose, -v    show meta information
+
+\033[1mExamples\033[0m:
+  \033[37m# Print all unfinished todos\033[0m
+  $COMMAND
+
+  \033[37m# Add a new todo\033[0m
+  $COMMAND --add \"write tests\"
+
+  \033[37m# Works unquoted without options\033[0m
+  $COMMAND build sock sorting machine
+
+  \033[37m# Mark a todo as done\033[0m
+  $COMMAND -x 3
+
+  \033[37m# Print all todos and include metadata\033[0m
+  $COMMAND --verbose
+"
+
+function add() {
+  writeln
+  writeln `date +'%Y-%m-%d %T'`
+  writeln "[ ] $@"
+}
+
+function writeln() {
+  echo "$@" >> $TODOS
+}
+
+function warn() {
+  echo
+  echo -e "\033[31m$1\033[0m"
+  echo
+  echo -e "\033[37mSee the instructions: \033[0m$COMMAND --help"
+}
+
+function print() {
+  echo
+  NUM=0
+  META=""
+  while read line; do
+    if [[ ${line:0:3} == "[ ]" ]]; then
+      ((NUM++))
+      # print meta data if populated
+      if [ ! -z "$META" ]; then
+        if [ $NUM -ne 1 ]; then
+          echo
+        fi;
+        echo -e "\033[37m$META\033[0m"
+      fi;
+      esc=$(printf '\033')
+      # colorize special attributes
+      line=$(echo -e "$line" | sed -e "s/^\[.\]/${esc}[37m&${esc}[0m/")
+      line=$(echo -e "$line" | sed -e "s/@[^ +]*/${esc}[95m&${esc}[0m/g")
+      line=$(echo -e "$line" | sed -e "s/\+[^ @]*/${esc}[34m&${esc}[0m/g")
+      echo -e "\033[1m$NUM\033[0m. $line"
+      META=""
+    elif [[ ${line:0:3} == "[x]" ]]; then
+      META=""
+    elif [ "$VERBOSE" == true ]; then
+      META+="$line"
+    fi;
+  done < $TODOS
+}
+
+function tick() {
+  NUM=0
+  FILE=""
+  BLOCK=""
+  while read line; do
+    if [ -z "$line" ]; then
+      # mirror blank lines
+      FILE+="$BLOCK"$'\n'
+      BLOCK=""
+    elif [[ ${line:0:3} == "[ ]" ]]; then
+      ((NUM++))
+      # match todo number and tick box
+      if [ $NUM == $1 ]; then
+        BLOCK="${BLOCK/$'\n'/ → `date +'%Y-%m-%d %T'`}"$'\n'
+        BLOCK+="${line/[ ]/$2}"$'\n'
+      else
+        BLOCK+="$line"$'\n'
+      fi;
+    else
+      # mirror meta data
+      BLOCK+="$line"$'\n'
+    fi;
+  done < $TODOS
+
+  #print to file
+  echo "$(echo "$FILE$BLOCK")" > $TODOS
+}
+
+VERBOSE=false
+if [ $# -eq 0 ]; then
+  # no args just prints
+  print
+else
+  for ARG in "$@"; do
+    # just print help text if flagged with help
+    if [ "$ARG" == "--help" ] || [ "$ARG" == "-h" ]; then
+      echo -e "$HELP"
+      exit 0
+    fi;
+  done
+
+  UNQUOTED=""
+  CAPTURE=false && ! [[ "$1" =~ ^-{1,2}.+ ]] && CAPTURE=true
+
+  INDEX=0
+  for ARG in "$@"; do
+    ((INDEX++))
+    NEXT=$(($INDEX + 1))
+
+    # capture unqoted arguments as if invoked with add command
+    if [ "$CAPTURE" == true ]; then
+      if [[ $ARG =~ ^-{1,2}.+ ]]; then
+        # stop capturing and add on first flag
+        add $UNQUOTED
+        CAPTURE=false
+      else
+        UNQUOTED="$UNQUOTED $ARG"
+        continue
+      fi;
+    fi;
+
+    if [ "$ARG" == "--verbose" ] || [ "$ARG" == "-v" ]; then
+      VERBOSE=true
+    elif [ "$ARG" == '--done' ] || [ "$ARG" == "-x" ]; then
+      # check that done command is followed by a number
+      if [ $# -eq $INDEX ] || ! [[ ${!NEXT} =~ $NUMBER ]]; then
+        warn "You need to enter the number of a todo."
+      else
+        tick ${!NEXT} "x"
+      fi;
+    elif [ "$ARG" == "--unset" ] || [ "$ARG" == "-u" ]; then
+      # check that unset command is followed by a number
+      if [ $# -eq $INDEX ] || ! [[ ${!NEXT} =~ $NUMBER ]]; then
+        warn "You need to enter the number of a todo."
+      else
+        tick ${!NEXT} "-"
+      fi;
+    elif [ "$ARG" == "--add" ] || [ "$ARG" == "-a" ]; then
+      # check that an actual todo was provided
+      if [ $# -eq $INDEX ]; then
+        warn "You need to enter a todo."
+      else
+        add ${!NEXT}
+      fi;
+    fi;
+  done
+
+  if [ "$CAPTURE" == true ]; then
+    add $UNQUOTED
+  fi;
+
+  print
+fi;
