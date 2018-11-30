@@ -1,8 +1,7 @@
 # todo
-
 My personal todo manager. Partly an exercise in bash and partly an excuse to procrastinate.
 
-Made for macOS and syncing over iCloud. It puts a `todo` file in yout `~/Documents` folder which server as a log and database.
+Made for macOS and syncing over iCloud. It puts a `todo` file in your `~/Documents` folder which server as a log and database.
 
 Todos can be tagged with a `+` and attached to a context with an `@`
 
@@ -31,7 +30,6 @@ $ todo # <- show only todos tagged with "my-project"
 ```
 
 ### Commands
-
 Just calling `todo` will print all undone todos. Todos can be added by appending a string to the command.
 
 ```bash
@@ -43,6 +41,7 @@ A series of commands can be used to add, unset (remove) and mark todos as done.
 - `--add, -a` add a new todo
 - `--unset, -u` unset a todo
 - `--done, -x` mark todo as done
+- `--log, -l` list all done todos
 - `--help, -h` show help text
 - `--verbose, -v` show meta information
 

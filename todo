@@ -10,6 +10,7 @@ HELP="
  --add, -a        add a new todo
  --unset, -u      unset a todo
  --done, -x       mark todo as done
+ --log, -l        list all done todos
  --help, -h       show this help text
  --verbose, -v    show meta information
 
@@ -18,10 +19,7 @@ HELP="
   $COMMAND
 
   \033[37m# Add a new todo\033[0m
-  $COMMAND --add \"write tests\"
-
-  \033[37m# Works unquoted without options\033[0m
-  $COMMAND build sock sorting machine
+  $COMMAND buy hammer @errand +renovation
 
   \033[37m# Mark a todo as done\033[0m
   $COMMAND -x 3
@@ -47,33 +45,72 @@ function warn() {
   echo -e "\033[37mSee the instructions: \033[0m$COMMAND --help"
 }
 
+function format() {
+  ESC=$(printf '\033')
+  CHECK="s/^\[.]\s*//g"
+  TAG="s/@[^ +]*/${ESC}[95m&${ESC}[0m/g"
+  TYPE="s/\+[^ @]*/${ESC}[34m&${ESC}[0m/g"
+  COMMENT="s/^#.*/${ESC}[37m&${ESC}[0m/"
+  DATE="s/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].*/${ESC}[37m&${ESC}[0m/"
+  echo -e "$1" | sed -e "$CHECK;$TAG;$TYPE;$COMMENT;$DATE"
+}
+
 function print() {
   echo
   NUM=0
   META=""
+
   while read line; do
-    if [[ ${line:0:3} == "[ ]" ]]; then
+    if [[ "$line" =~ ^\[\ \] ]]; then
       ((NUM++))
-      # print meta data if populated
+      if [ ! -z "$META" ]; then echo; fi
+      echo -e "\033[1m$NUM\033[0m. $(format "$line")"
       if [ ! -z "$META" ]; then
-        if [ $NUM -ne 1 ]; then
-          echo
-        fi;
-        echo -e "\033[37m$META\033[0m"
-      fi;
-      esc=$(printf '\033')
-      # colorize special attributes
-      line=$(echo -e "$line" | sed -e "s/^\[.\]/${esc}[37m&${esc}[0m/")
-      line=$(echo -e "$line" | sed -e "s/@[^ +]*/${esc}[95m&${esc}[0m/g")
-      line=$(echo -e "$line" | sed -e "s/\+[^ @]*/${esc}[34m&${esc}[0m/g")
-      echo -e "\033[1m$NUM\033[0m. $line"
+        INDENT="  $(printf "%*s" ${#NUM})"
+        echo -e "$META" | sed "s/^/$INDENT/"
+      fi
       META=""
-    elif [[ ${line:0:3} == "[x]" ]]; then
+    elif [[ "$line" =~ ^\[(x|-)\] ]]; then
       META=""
     elif [ "$VERBOSE" == true ]; then
-      META+="$line"
-    fi;
+      if [[ ! -z "$META" ]]; then META="$META\n$(format "$line")"
+      else META="$(format "$line")"; fi
+    fi
   done < $TODOS
+}
+
+function log() {
+  TODO=""
+  META=""
+  NUM=0
+  LAST=$(($1 * 10))
+  FIRST=$(($LAST - 10))
+
+  while read line; do
+    if [[ $line =~ ^\[(x|-|\ )\] ]]; then
+      if [[ $NUM -ge $LAST ]]; then break; fi
+      if [[ $NUM -ge $FIRST ]] && [[ ! -z "$TODO" ]]; then
+        if [ ! -z "$META" ]; then echo -e "$META"; fi
+        echo "$TODO"
+      fi
+      if [[ "$line" =~ ^\[(x|-)\] ]]; then
+        ((NUM++))
+        TODO=" $(format "$line")"
+        META=""
+      elif [[ "$line" =~ ^\[\ \] ]]; then
+        META=""
+        TODO=""
+      fi
+    else
+      if [[ ! -z "$META" ]]; then META=" $(format "$line")\n$META"
+      else META=" $(format "$line")"; fi
+    fi
+  done < <(tail -r ${TODOS})
+
+  if [[ ! -z "$TODO" ]]; then
+    if [[ ! -z "$META" ]]; then echo -e "$META"; fi
+    echo "$TODO"
+  fi
 }
 
 function tick() {
@@ -139,6 +176,15 @@ else
 
     if [ "$ARG" == "--verbose" ] || [ "$ARG" == "-v" ]; then
       VERBOSE=true
+    elif [ "$ARG" == '--log' ] || [ "$ARG" == "-l" ]; then
+      PAGE=1
+      log ${PAGE}
+      echo "‣ Press any key to see more"
+      while read -rsn1 COMMAND; do
+        ((++PAGE))
+        log ${PAGE}
+        echo "‣ Press any key to see more"
+      done
     elif [ "$ARG" == '--done' ] || [ "$ARG" == "-x" ]; then
       # check that done command is followed by a number
       if [ $# -eq $INDEX ] || ! [[ ${!NEXT} =~ $NUMBER ]]; then
