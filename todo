@@ -127,7 +127,7 @@ function log() {
     if [[ -z $line ]]; then continue; fi
     if [[ $line =~ $any_re ]]; then
       if [ $num -ge $last ]; then break; fi
-      if [ $num -ge $first ] && [[ ! -z "$todo" ]]; then
+      if [ $num -gt $first ] && [[ ! -z "$todo" ]]; then
         echo -e "$todo"
         if [ ! -z "$meta" ]; then echo -e "$meta"; fi
       fi
@@ -222,7 +222,7 @@ else
       log $page
       while read -rsn1 -p "$(echo -e "\n‣ Press q to quit or any other key to see more\r")" key; do
         if [ "$key" == 'q' ]; then exit 0; fi
-        ((++page))
+        ((page++))
         delimiter=" " && [[ $(tput cols) -gt 80 ]] && delimiter="-"
         center " PAGE $page " $delimiter
         echo
