@@ -151,7 +151,7 @@ function log() {
   fi
 }
 
-# tock todo with given char
+# tick todo with given char
 # (num, str) -> i/o
 function tick() {
   local num=0
