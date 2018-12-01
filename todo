@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 
-NUMBER='^[0-9]+$'
-TODOS="$HOME/Documents/todo.txt"
-COMMAND="$0"
-HELP="
-\033[1mUsage\033[0m: \033[36m$COMMAND [option] <task>\033[0m
+number_re='^[0-9]+$'
+empty_re='^\[\ \]'
+done_re='^\[x\]'
+unset_re='^\[-\]'
+filled_re='^\[(x|-)\]'
+any_re='^\[(x|-|\ )\]'
+todo_file="$HOME/Documents/todo.txt"
+help="
+\033[1mUsage\033[0m: \033[36mtodo [option] <task>\033[0m
 
 \033[1mOptions\033[0m:
  --add, -a        add a new todo
@@ -16,201 +20,240 @@ HELP="
 
 \033[1mExamples\033[0m:
   \033[37m# Print all unfinished todos\033[0m
-  $COMMAND
+  todo
 
   \033[37m# Add a new todo\033[0m
-  $COMMAND buy hammer @errand +renovation
+  todo buy hammer @errand +renovation
 
   \033[37m# Mark a todo as done\033[0m
-  $COMMAND -x 3
+  todo -x 3
 
   \033[37m# Print all todos and include metadata\033[0m
-  $COMMAND --verbose
+  todo --verbose
 "
 
+# add a todo
+# str -> i/o
 function add() {
   writeln
   writeln `date +'%Y-%m-%d %T'`
   writeln "[ ] $@"
 }
 
+# write to end of file
+# str -> i/o
 function writeln() {
-  echo "$@" >> $TODOS
+  echo "$@" >> $todo_file
 }
 
+# print warning
+# str -> echo
 function warn() {
   echo
   echo -e "\033[31m$1\033[0m"
   echo
-  echo -e "\033[37mSee the instructions: \033[0m$COMMAND --help"
+  echo -e "\033[37mSee the instructions: \033[0mtodo --help"
 }
 
-function format() {
-  ESC=$(printf '\033')
-  CHECK="s/^\[.]\s*//g"
-  TAG="s/@[^ +]*/${ESC}[95m&${ESC}[0m/g"
-  TYPE="s/\+[^ @]*/${ESC}[34m&${ESC}[0m/g"
-  COMMENT="s/^#.*/${ESC}[37m&${ESC}[0m/"
-  DATE="s/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].*/${ESC}[37m&${ESC}[0m/"
-  echo -e "$1" | sed -e "$CHECK;$TAG;$TYPE;$COMMENT;$DATE"
+# decorate str with colors and style
+# str -> echo
+function decorate() {
+  local esc=$(printf '\033')
+  local check="s/^\[.]\s*//g"
+  local type="s/@[^ +]*/${esc}[0m${esc}[95m&${esc}[0m/g"
+  local tag="s/\+[^ @]*/${esc}[0m${esc}[34m&${esc}[0m/g"
+  local comment="s/^#.*/${esc}[37m&${esc}[0m/"
+  local date="s/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].*/${esc}[37m&${esc}[0m/"
+  echo -e "$1" | sed -e "$check;$type;$tag;$comment;$date"
 }
 
+# center string in terminal w/ optional delimiter
+# str -> echo
+function center() {
+  local str=$1
+  local cols=$((($(tput cols) - ${#str}) / 2))
+  local col=0
+  while [[ col -lt cols ]]; do
+    ((col++))
+    echo -en "\033[37m${2:-" "}\033[0m"
+  done
+  echo -n "$str"
+  col=0
+  while [[ col -lt cols ]]; do
+    ((col++))
+    echo -en "\033[37m${2:-" "}\033[0m"
+  done
+}
+
+# print all undone todos
+# () -> echo
 function print() {
   echo
-  NUM=0
-  META=""
+  local num=0
+  local meta=""
 
   while read line; do
-    if [[ "$line" =~ ^\[\ \] ]]; then
-      ((NUM++))
-      if [ ! -z "$META" ]; then echo; fi
-      echo -e "\033[1m$NUM\033[0m. $(format "$line")"
-      if [ ! -z "$META" ]; then
-        INDENT="  $(printf "%*s" ${#NUM})"
-        echo -e "$META" | sed "s/^/$INDENT/"
+    if [[ "$line" =~ $empty_re ]]; then
+      ((num++))
+      if [ ! -z "$meta" ]; then echo; fi
+      echo -en "\033[1m$num. "
+      if [ "$verbose" == false ]; then echo -en "\033[0m"; fi
+      echo -en $(decorate "$line")
+      echo -e "\033[0m"
+      if [ ! -z "$meta" ]; then
+        local indent="  $(printf "%*s" ${#num})"
+        echo -e "$meta" | sed "s/^/$indent/"
       fi
-      META=""
-    elif [[ "$line" =~ ^\[(x|-)\] ]]; then
-      META=""
-    elif [ "$VERBOSE" == true ]; then
-      if [[ ! -z "$META" ]]; then META="$META\n$(format "$line")"
-      else META="$(format "$line")"; fi
+      meta=""
+    elif [[ "$line" =~ $filled_re ]]; then
+      meta=""
+    elif [ "$verbose" == true ]; then
+      if [[ ! -z "$meta" ]]; then meta="$meta\n$(decorate "$line")"
+      else meta="$(decorate "$line")"; fi
     fi
-  done < $TODOS
+  done < $todo_file
 }
 
+# print paginated set batch of done todos
+# num -> echo
 function log() {
-  TODO=""
-  META=""
-  NUM=0
-  LAST=$(($1 * 10))
-  FIRST=$(($LAST - 10))
+  local todo=""
+  local meta=""
+  local num=0
+  local last=$(($1 * 10))
+  local first=$(($last - 10))
 
   while read line; do
-    if [[ $line =~ ^\[(x|-|\ )\] ]]; then
-      if [[ $NUM -ge $LAST ]]; then break; fi
-      if [[ $NUM -ge $FIRST ]] && [[ ! -z "$TODO" ]]; then
-        if [ ! -z "$META" ]; then echo -e "$META"; fi
-        echo "$TODO"
+    if [[ -z $line ]]; then continue; fi
+    if [[ $line =~ $any_re ]]; then
+      if [ $num -ge $last ]; then break; fi
+      if [ $num -ge $first ] && [[ ! -z "$todo" ]]; then
+        echo -e "$todo"
+        if [ ! -z "$meta" ]; then echo -e "$meta"; fi
       fi
-      if [[ "$line" =~ ^\[(x|-)\] ]]; then
-        ((NUM++))
-        TODO=" $(format "$line")"
-        META=""
-      elif [[ "$line" =~ ^\[\ \] ]]; then
-        META=""
-        TODO=""
+      if [[ "$line" =~ $done_re ]]; then
+        ((num++))
+        todo="\n \033[1m$(decorate "$line")\033[0m"
+        meta=""
+      else
+        meta=""
+        todo=""
       fi
     else
-      if [[ ! -z "$META" ]]; then META=" $(format "$line")\n$META"
-      else META=" $(format "$line")"; fi
+      if [[ ! -z "$meta" ]]; then meta=" $(decorate "$line")\n$meta"
+      else meta=" $(decorate "$line")"; fi
     fi
-  done < <(tail -r ${TODOS})
+  done < <(tail -r ${todo_file})
 
-  if [[ ! -z "$TODO" ]]; then
-    if [[ ! -z "$META" ]]; then echo -e "$META"; fi
-    echo "$TODO"
+  if [[ ! -z "$todo" ]]; then
+    echo -e "$todo"
+    if [[ ! -z "$meta" ]]; then echo -e "$meta"; fi
   fi
 }
 
+# tock todo with given char
+# (num, str) -> i/o
 function tick() {
-  NUM=0
-  FILE=""
-  BLOCK=""
+  local num=0
+  local file=""
+  local block=""
+
   while read line; do
     if [ -z "$line" ]; then
       # mirror blank lines
-      FILE+="$BLOCK"$'\n'
-      BLOCK=""
-    elif [[ ${line:0:3} == "[ ]" ]]; then
-      ((NUM++))
+      file+="$block"$'\n'
+      block=""
+    elif [[ $line =~ $empty_re ]]; then
+      ((num++))
       # match todo number and tick box
-      if [ $NUM == $1 ]; then
-        BLOCK="${BLOCK/$'\n'/ → `date +'%Y-%m-%d %T'`}"$'\n'
-        BLOCK+="${line/[ ]/$2}"$'\n'
+      if [ $num == $1 ]; then
+        block="${block/$'\n'/ → `date +'%Y-%m-%d %T'`}"$'\n'
+        block+="${line/[ ]/$2}"$'\n'
       else
-        BLOCK+="$line"$'\n'
+        block+="$line"$'\n'
       fi;
     else
       # mirror meta data
-      BLOCK+="$line"$'\n'
+      block+="$line"$'\n'
     fi;
-  done < $TODOS
+  done < $todo_file
 
   #print to file
-  echo "$(echo "$FILE$BLOCK")" > $TODOS
+  echo "$(echo "$file$block")" > $todo_file
 }
 
-VERBOSE=false
+verbose=false
 if [ $# -eq 0 ]; then
   # no args just prints
   print
 else
-  for ARG in "$@"; do
+  for arg in "$@"; do
     # just print help text if flagged with help
-    if [ "$ARG" == "--help" ] || [ "$ARG" == "-h" ]; then
-      echo -e "$HELP"
+    if [ "$arg" == '--help' ] || [ "$arg" == '-h' ]; then
+      echo -e "$help"
       exit 0
     fi;
   done
 
-  UNQUOTED=""
-  CAPTURE=false && ! [[ "$1" =~ ^-{1,2}.+ ]] && CAPTURE=true
+  unquoted=""
+  capture=false && ! [[ "$1" =~ ^-{1,2}.+ ]] && capture=true
 
-  INDEX=0
-  for ARG in "$@"; do
-    ((INDEX++))
-    NEXT=$(($INDEX + 1))
+  index=0
+  for arg in "$@"; do
+    ((index++))
+    next=$(($index + 1))
 
     # capture unqoted arguments as if invoked with add command
-    if [ "$CAPTURE" == true ]; then
-      if [[ $ARG =~ ^-{1,2}.+ ]]; then
+    if [ "$capture" == true ]; then
+      if [[ $arg =~ ^-{1,2}.+ ]]; then
         # stop capturing and add on first flag
-        add $UNQUOTED
-        CAPTURE=false
+        add $unquoted
+        capture=false
       else
-        UNQUOTED="$UNQUOTED $ARG"
+        unquoted="$unquoted $arg"
         continue
       fi;
     fi;
 
-    if [ "$ARG" == "--verbose" ] || [ "$ARG" == "-v" ]; then
-      VERBOSE=true
-    elif [ "$ARG" == '--log' ] || [ "$ARG" == "-l" ]; then
-      PAGE=1
-      log ${PAGE}
-      echo "‣ Press any key to see more"
-      while read -rsn1 COMMAND; do
-        ((++PAGE))
-        log ${PAGE}
-        echo "‣ Press any key to see more"
+    if [ "$arg" == '--verbose' ] || [ "$arg" == '-v' ]; then
+      verbose=true
+    elif [ "$arg" == '--log' ] || [ "$arg" == '-l' ]; then
+      page=1
+      log $page
+      while read -rsn1 -p "$(echo -e "\n‣ Press q to quit or any other key to see more\r")" key; do
+        if [ "$key" == 'q' ]; then exit 0; fi
+        ((++page))
+        delimiter=" " && [[ $(tput cols) -gt 80 ]] && delimiter="-"
+        center " PAGE $page " $delimiter
+        echo
+        log $page
       done
-    elif [ "$ARG" == '--done' ] || [ "$ARG" == "-x" ]; then
+    elif [ "$arg" == '--done' ] || [ "$arg" == '-x' ]; then
       # check that done command is followed by a number
-      if [ $# -eq $INDEX ] || ! [[ ${!NEXT} =~ $NUMBER ]]; then
-        warn "You need to enter the number of a todo."
+      if [ $# -eq $index ] || ! [[ ${!next} =~ $number_re ]]; then
+        warn 'You need to enter the number of a todo.'
       else
-        tick ${!NEXT} "x"
+        tick ${!next} 'x'
       fi;
-    elif [ "$ARG" == "--unset" ] || [ "$ARG" == "-u" ]; then
+    elif [ "$arg" == '--unset' ] || [ "$arg" == '-u' ]; then
       # check that unset command is followed by a number
-      if [ $# -eq $INDEX ] || ! [[ ${!NEXT} =~ $NUMBER ]]; then
-        warn "You need to enter the number of a todo."
+      if [ $# -eq $index ] || ! [[ ${!next} =~ $number_re ]]; then
+        warn 'You need to enter the number of a todo.'
       else
-        tick ${!NEXT} "-"
+        tick ${!next} '-'
       fi;
-    elif [ "$ARG" == "--add" ] || [ "$ARG" == "-a" ]; then
+    elif [ "$arg" == '--add' ] || [ "$arg" == '-a' ]; then
       # check that an actual todo was provided
-      if [ $# -eq $INDEX ]; then
-        warn "You need to enter a todo."
+      if [ $# -eq $index ]; then
+        warn 'You need to enter a todo.'
       else
-        add ${!NEXT}
+        add ${!next}
       fi;
     fi;
   done
 
-  if [ "$CAPTURE" == true ]; then
-    add $UNQUOTED
+  if [ "$capture" == true ]; then
+    add $unquoted
   fi;
 
   print
