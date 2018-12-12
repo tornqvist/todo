@@ -62,7 +62,7 @@ function decorate() {
   local check="s/^\[.]\s*//g"
   local type="s/@[^ +]*/${esc}[0m${esc}[95m&${esc}[0m/g"
   local tag="s/\+[^ @]*/${esc}[0m${esc}[34m&${esc}[0m/g"
-  local comment="s/^#.*/${esc}[37m&${esc}[0m/"
+  local comment="s/^#[^\n]+/${esc}[37m_&_${esc}[0m/gm"
   local date="s/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].*/${esc}[37m&${esc}[0m/"
   echo -e "$1" | sed -e "$check;$type;$tag;$comment;$date"
 }
@@ -157,6 +157,14 @@ function tick() {
   local num=0
   local file=""
   local block=""
+  local action="$2"
+
+  local symbols=('x' '-')
+  local labels=('done' 'unset')
+  for i in ${!symbols[*]}
+  do
+    if [[ "${symbols[$i]}" == "$2" ]]; then action=${labels[$i]}; fi;
+  done
 
   while read line; do
     if [ -z "$line" ]; then
@@ -167,8 +175,18 @@ function tick() {
       ((num++))
       # match todo number and tick box
       if [ $num == $1 ]; then
-        block="${block/$'\n'/ → `date +'%Y-%m-%d %T'`}"$'\n'
-        block+="${line/[ ]/$2}"$'\n'
+        # add completion timestamp
+        local timestamp='^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].*'
+        block=$(echo -e "$block" | sed -e "s/$timestamp/& → `date +'%Y-%m-%d %T'`/")
+        echo
+        if [ "$verbose" == true ]; then
+          # print metadata if in verbose mode
+          local meta=$(decorate "$block")
+          echo -e "    ${meta/$'\n'/$'\n    '}"
+        fi
+        # print updated todo
+        echo -e "[$2] $(decorate "$line")"
+        block+=$'\n'"${line/[ ]/$2}"$'\n'
       else
         block+="$line"$'\n'
       fi;
@@ -249,12 +267,12 @@ else
       else
         add ${!next}
       fi;
+      print
     fi;
   done
 
   if [ "$capture" == true ]; then
     add $unquoted
+    print
   fi;
-
-  print
 fi;
